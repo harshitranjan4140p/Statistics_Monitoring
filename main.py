@@ -1,77 +1,65 @@
 import psutil
-import wmi
-import pynvml
+import GPUtil
 import time
-import os
+import tkinter as tk
 
+def get_system_stats(frame_count, start_time):
+    # CPU usage
+    cpu_usage = psutil.cpu_percent(interval=0)
 
-# ---------- CPU USAGE & TEMP ----------
-def get_cpu_usage():
-    return psutil.cpu_percent(interval=1)
+    # RAM usage
+    ram = psutil.virtual_memory()
+    ram_usage = ram.percent
+    ram_used = round(ram.used / (1024 ** 3), 2)
+    ram_total = round(ram.total / (1024 ** 3), 2)
 
+    # GPU stats
+    gpus = GPUtil.getGPUs()
+    if gpus:
+        gpu = gpus[0]
+        gpu_load = gpu.load * 100
+        gpu_temp = gpu.temperature
+        gpu_mem_used = round(gpu.memoryUsed, 2)
+        gpu_mem_total = round(gpu.memoryTotal, 2)
+    else:
+        gpu_load = gpu_temp = gpu_mem_used = gpu_mem_total = "N/A"
 
-def get_cpu_temp():
-    try:
-        w = wmi.WMI(namespace="root\\wmi")
-        temperature_info = w.MSAcpi_ThermalZoneTemperature()
-        if temperature_info:
-            # Convert from tenths of Kelvin to Celsius
-            return round((temperature_info[0].CurrentTemperature / 10) - 273.15, 1)
-    except Exception:
-        pass
-    return None  # Not available
+    # FPS
+    elapsed_time = time.time() - start_time
+    fps = frame_count / elapsed_time if elapsed_time > 0 else 0
 
+    return {
+        "FPS": f"{fps:.2f}",
+        "CPU": f"{cpu_usage}%",
+        "RAM": f"{ram_usage}% ({ram_used}GB/{ram_total}GB)",
+        "GPU Load": f"{gpu_load}%",
+        "GPU Temp": f"{gpu_temp}°C",
+        "GPU Mem": f"{gpu_mem_used}MB/{gpu_mem_total}MB"
+    }
 
-# ---------- GPU USAGE & TEMP ----------
-def get_gpu_info():
-    try:
-        pynvml.nvmlInit()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+def update_stats():
+    global frame_count
+    frame_count += 1
+    stats = get_system_stats(frame_count, start_time)
 
-        name = pynvml.nvmlDeviceGetName(handle).decode()
-        temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+    for key, label in labels.items():
+        label.config(text=f"{key}: {stats[key]}")
 
-        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
-        gpu_util = util.gpu  # GPU usage %
-        mem_util = util.memory  # Memory controller usage %
+    root.after(500, update_stats)  # update every 0.5s
 
-        pynvml.nvmlShutdown()
+# GUI setup
+root = tk.Tk()
+root.title("FPS & System Monitor")
+root.configure(bg="black")
 
-        return {
-            "name": name,
-            "temp": temp,
-            "gpu_util": gpu_util,
-            "mem_util": mem_util,
-        }
-    except Exception as e:
-        return None
+labels = {}
+for key in ["FPS", "CPU", "RAM", "GPU Load", "GPU Temp", "GPU Mem"]:
+    lbl = tk.Label(root, text=f"{key}: --", font=("Consolas", 12), fg="lime", bg="black")
+    lbl.pack(anchor="w", padx=10, pady=2)
+    labels[key] = lbl
 
+frame_count = 0
+start_time = time.time()
 
-# ---------- MAIN LOOP ----------
-if __name__ == "__main__":
-    while True:
-        os.system("cls")  # clear screen on Windows
-
-        # CPU
-        cpu_usage = get_cpu_usage()
-        cpu_temp = get_cpu_temp()
-
-        print("=== CPU ===")
-        print(f"Usage: {cpu_usage:.1f}%")
-        if cpu_temp is not None:
-            print(f"Temperature: {cpu_temp} °C")
-        else:
-            print("Temperature: Not available (Windows limitation)")
-
-        # GPU
-        gpu = get_gpu_info()
-        print("\n=== GPU ===")
-        if gpu:
-            print(f"Name: {gpu['name']}")
-            print(f"Usage: {gpu['gpu_util']}%")
-            print(f"Memory Controller: {gpu['mem_util']}%")
-            print(f"Temperature: {gpu['temp']} °C")
-        else:
-            print("No NVIDIA GPU detected or NVML not installed")
-
-        time.sleep(2)  # refresh every 2 seconds
+update_stats()
+root.mainloop()
